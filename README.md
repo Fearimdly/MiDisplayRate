@@ -13,6 +13,7 @@ FOLD2外屏的可变刷新率策略是：通常情况下120Hz，打开某些App�
 1. 通常请求切换刷新率的接口是修改WindowManager.LayoutParams.preferredDisplayModeId，但是小米似乎在framework做了一些改动，会导致结果不符合预期，比如从120切到60的时候，虽然会正确引起SurfaceFlinger的更新，但是maxRate总是120，就很奇怪，最后是反射修改了WindowManager.LayoutParams.preferredMaxDisplayRefreshRate。这个属性是@hide属性，所以很可能说不定哪天小米就改了
 1. 项目非常早期，还是demo阶段，什么申请权限、用户界面什么的都没搞，有需要的权限先去系统设置里手动开启
 1. 某些被小米锁了60Hz的App，比如抖音等无法切换到120Hz
+1. 前提是系统设置显示刷新率是120Hz
 
 ## 后续计划
 1. Service换成AccessibilityService，因为Accessibility Window可以在尽可能高的位置，比如可以覆盖导航条，目前触摸导航条、侧边返回手势、通知栏都接收不到手势
