@@ -1,58 +1,181 @@
 package com.moki.midisplayrate
 
+import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.database.ContentObserver
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.os.Message
+import android.provider.Settings
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.MotionEvent.*
 import android.view.View
+import android.view.View.OnTouchListener
+import android.view.ViewConfiguration
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.WindowManager
+import android.view.accessibility.AccessibilityEvent
 import kotlinx.coroutines.*
 import java.lang.reflect.Field
 
 @SuppressLint("ClickableViewAccessibility")
-class FloatWindowService : Service() {
+class FloatWindowService : AccessibilityService() {
+
+    companion object {
+        private const val SHOW_WINDOW = "com.moki.midisplayrate.showWindow"
+        private const val FLOAT_INIT_X = 0
+        private const val FLOAT_INIT_Y = 400
+
+        fun showFloatWindow(context: Context) {
+            context.startService(
+                Intent(context, FloatWindowService::class.java).apply {
+                    action = SHOW_WINDOW
+                }
+            )
+        }
+    }
+
     private val windowManager by lazy {
-        application.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        getSystemService(Context.WINDOW_SERVICE) as WindowManager
     }
 
     private val floatWindow by lazy {
         View(this).apply {
-            setBackgroundColor(Color.BLUE)
-            setOnTouchListener { _, _ ->
-                setHighRate()
-                startLowRateTimer()
-                true
-            }
+            alpha = 0.2f
         }
     }
 
     private val floatLayoutParams by lazy {
         WindowManager.LayoutParams().apply {
-            type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+            type = WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
             flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                     WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
             format = PixelFormat.TRANSPARENT
-            width = 30
-            height = MATCH_PARENT
-            gravity = Gravity.START
+            width = 30.dp()
+            height = 30.dp()
+            gravity = Gravity.START or Gravity.TOP
+            x = FLOAT_INIT_X
+            y = FLOAT_INIT_Y
         }
     }
 
     private var lowRateModeTimerJob: Job? = null
 
-    override fun onBind(p0: Intent?): IBinder? {
-        return null
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        when(event?.eventType) {
+            AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
+                setHighRate()
+                startLowRateTimer(500)
+            }
+        }
+    }
+
+    override fun onInterrupt() {
+
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        setFloatViewBySpeedMode()
+        contentResolver.registerContentObserver(
+            Settings.System.getUriFor("speed_mode"),
+            true,
+            object : ContentObserver(Handler(Looper.getMainLooper())) {
+                override fun onChange(selfChange: Boolean) {
+                    super.onChange(selfChange)
+                    setFloatViewBySpeedMode()
+                }
+            }
+        )
+    }
+
+    private fun speedMode(): Boolean {
+        return try {
+            Settings.System.getInt(contentResolver, "speed_mode") > 0
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun setSpeedMode(isSpeedMode: Boolean) {
+        Settings.System.putInt(contentResolver, "speed_mode", if (isSpeedMode) 1 else 0)
+    }
+
+    private fun setFloatViewBySpeedMode() {
+        val isSpeedMode = speedMode()
+        floatWindow.apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setSize(1000, 1000)
+                setColor(
+                    if (isSpeedMode) {
+                        Color.GREEN
+                    } else {
+                        Color.RED
+                    }
+                )
+            }
+
+            setOnTouchListener(
+                object : OnTouchListener {
+                    private var initX = FLOAT_INIT_X.toFloat()
+                    private var initY = FLOAT_INIT_Y.toFloat()
+                    private var timeDown = System.currentTimeMillis()
+                    private var isLongClick = false
+
+                    override fun onTouch(v: View?, event: MotionEvent): Boolean {
+                        when(event.action) {
+                            ACTION_OUTSIDE -> {
+                                if (isSpeedMode) {
+                                    setHighRate()
+                                    startLowRateTimer()
+                                }
+                            }
+
+                            ACTION_DOWN -> {
+                                initX = event.x
+                                initY = event.y
+                                timeDown = System.currentTimeMillis()
+                            }
+
+                            ACTION_MOVE -> {
+                                if (System.currentTimeMillis() - timeDown > ViewConfiguration.getLongPressTimeout()) {
+                                    isLongClick = true
+                                }
+                            }
+
+                            ACTION_UP -> {
+                                if (!isLongClick) {
+                                    if (isSpeedMode) {
+                                        setHighRate()
+                                        startLowRateTimer()
+                                        setSpeedMode(false)
+                                    } else {
+                                        setSpeedMode(true)
+                                    }
+                                }
+                            }
+                        }
+                        return true
+                    }
+                }
+            )
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        showFloatWindow()
-        startLowRateTimer()
+        if (intent?.action == SHOW_WINDOW) {
+            showFloatWindow()
+        }
         return super.onStartCommand(intent, flags, startId)
     }
 
@@ -87,13 +210,13 @@ class FloatWindowService : Service() {
         setRate(60f)
     }
 
-    private fun startLowRateTimer() {
+    private fun startLowRateTimer(delay: Long = 1500) {
         if (lowRateModeTimerJob?.isActive == true) {
             lowRateModeTimerJob?.cancel()
             lowRateModeTimerJob = null
         }
         lowRateModeTimerJob = CoroutineScope(Dispatchers.Default).launch {
-            delay(1500)
+            delay(delay)
             withContext(Dispatchers.Main) {
                 setLowRate()
             }
