@@ -3,25 +3,25 @@ package com.moki.midisplayrate
 import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
 import android.app.Service
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.database.ContentObserver
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.Message
 import android.provider.Settings
-import android.view.Gravity
-import android.view.MotionEvent
+import android.view.*
+import android.view.Display.DEFAULT_DISPLAY
 import android.view.MotionEvent.*
-import android.view.View
 import android.view.View.OnTouchListener
-import android.view.ViewConfiguration
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
-import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import kotlinx.coroutines.*
 import java.lang.reflect.Field
@@ -68,13 +68,16 @@ class FloatWindowService : AccessibilityService() {
         }
     }
 
+    private var isSpeedMode: Boolean = false
     private var lowRateModeTimerJob: Job? = null
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         when(event?.eventType) {
             AccessibilityEvent.TYPE_VIEW_SCROLLED -> {
-                setHighRate()
-                startLowRateTimer(500)
+                if (isSpeedMode) {
+                    setHighRate()
+                    startLowRateTimer(500)
+                }
             }
         }
     }
@@ -96,6 +99,21 @@ class FloatWindowService : AccessibilityService() {
                 }
             }
         )
+        registerReceiver(
+            object : BroadcastReceiver() {
+                override fun onReceive(context: Context?, intent: Intent?) {
+                    when(intent?.action) {
+                        Intent.ACTION_USER_PRESENT -> {
+                            if (isSpeedMode) {
+                                setHighRate()
+                                startLowRateTimer()
+                            }
+                        }
+                    }
+                }
+            },
+            IntentFilter(Intent.ACTION_USER_PRESENT)
+        )
     }
 
     private fun speedMode(): Boolean {
@@ -111,7 +129,7 @@ class FloatWindowService : AccessibilityService() {
     }
 
     private fun setFloatViewBySpeedMode() {
-        val isSpeedMode = speedMode()
+        isSpeedMode = speedMode()
         floatWindow.apply {
             background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
@@ -196,9 +214,12 @@ class FloatWindowService : AccessibilityService() {
     private fun setRate(rate: Float) {
         if (!isFloatWindowShown()) return
         val fieldMeta = Class::class.java.getDeclaredMethod("getDeclaredField", String::class.java)
-        fieldMeta.invoke(WindowManager.LayoutParams::class.java, "preferredMaxDisplayRefreshRate").run {
+        val field = fieldMeta.invoke(WindowManager.LayoutParams::class.java, "preferredMaxDisplayRefreshRate").run {
             this as Field
-        }.set(floatLayoutParams, rate)
+        }
+        if (field.get(floatLayoutParams) != rate) {
+            field.set(floatLayoutParams, rate)
+        }
         windowManager.updateViewLayout(floatWindow, floatLayoutParams)
     }
 
@@ -218,7 +239,9 @@ class FloatWindowService : AccessibilityService() {
         lowRateModeTimerJob = CoroutineScope(Dispatchers.Default).launch {
             delay(delay)
             withContext(Dispatchers.Main) {
-                setLowRate()
+                if (isSpeedMode) {
+                    setLowRate()
+                }
             }
         }
     }
