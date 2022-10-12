@@ -2,27 +2,23 @@ package com.moki.midisplayrate
 
 import android.accessibilityservice.AccessibilityService
 import android.annotation.SuppressLint
-import android.app.Service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.res.Configuration
 import android.database.ContentObserver
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
-import android.hardware.display.DisplayManager
 import android.os.Handler
-import android.os.IBinder
 import android.os.Looper
-import android.os.Message
 import android.provider.Settings
 import android.view.*
-import android.view.Display.DEFAULT_DISPLAY
 import android.view.MotionEvent.*
 import android.view.View.OnTouchListener
-import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.accessibility.AccessibilityEvent
+import android.widget.Toast
 import kotlinx.coroutines.*
 import java.lang.reflect.Field
 
@@ -68,6 +64,9 @@ class FloatWindowService : AccessibilityService() {
         }
     }
 
+    private val SCREEN_LAYOUT_INTERNAL = 0x10000153
+    private val SCREEN_LAYOUT_OUTSIDE = 0x10000162
+
     private var isSpeedMode: Boolean = false
     private var lowRateModeTimerJob: Job? = null
 
@@ -84,6 +83,21 @@ class FloatWindowService : AccessibilityService() {
 
     override fun onInterrupt() {
 
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val layout = newConfig.screenLayout
+        if (layout == this.SCREEN_LAYOUT_INTERNAL) {
+            Toast.makeText(this.applicationContext, "内屏, LTPO", Toast.LENGTH_SHORT).show()
+            this.setSpeedMode(false)
+        } else if (layout == this.SCREEN_LAYOUT_OUTSIDE){
+            Toast.makeText(this.applicationContext, "外屏, 60-120", Toast.LENGTH_SHORT).show()
+            this.setSpeedMode(true)
+        } else {
+            Toast.makeText(this.applicationContext, "不知道哪块屏", Toast.LENGTH_SHORT).show()
+            this.setSpeedMode(false)
+        }
     }
 
     override fun onCreate() {
